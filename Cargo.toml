@@ -1,0 +1,59 @@
+[package]
+edition = "2021"
+name = "ti-i2c"
+version = "0.1.0"
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+opt-level = "z"
+panic = "abort"
+lto = true
+
+[features]
+default = [ "defmt-logging", "defmt-serial" ]
+defmt-logging = [
+  "defmt",
+  "embassy-executor/defmt",
+  "embassy-time/defmt",
+  "embassy-usb/defmt",
+  "usbd-hid/defmt",
+  "embassy-time/defmt-timestamp-uptime",
+  "embassy-rp/defmt",
+  "panic-probe/print-defmt",
+]
+
+[dependencies]
+cortex-m = "0.7.6"
+cortex-m-rt = "0.7.0"
+panic-probe = "0.3"
+git-version = "0.3.9"
+assign-resources = "0.4.1"
+usbd-hid = "0.7.0"
+static_cell = "2.0.0"
+portable-atomic = { version = "1.5", features = ["critical-section"] }
+futures = { version = "0.3.30", default-features = false }
+defmt = { version = "0.3", optional = true }
+defmt-rtt = { version = "0.4.0", optional = true }
+defmt-serial = { version = "0.8.0", optional = true }
+
+[dependencies.embassy-rp]
+git = "https://github.com/embassy-rs/embassy"
+features = [ "unstable-pac", "time-driver", "critical-section-impl"]
+
+[dependencies.embassy-executor]
+git = "https://github.com/embassy-rs/embassy"
+features = [ "arch-cortex-m", "executor-thread", "executor-interrupt", "integrated-timers" ]
+
+[dependencies.embassy-time]
+git = "https://github.com/embassy-rs/embassy"
+
+[dependencies.embassy-usb]
+git = "https://github.com/embassy-rs/embassy"
+
+[dependencies.embassy-usb-driver]
+git = "https://github.com/embassy-rs/embassy"
+
+[dependencies.embassy-sync]
+git = "https://github.com/embassy-rs/embassy"
