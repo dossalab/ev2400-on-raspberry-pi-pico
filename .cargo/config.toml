@@ -5,4 +5,4 @@ runner = "./blackmagic-run.sh flash logs"
 target = "thumbv6m-none-eabi"
 
 [env]
-DEFMT_LOG = "trace"
+DEFMT_LOG = "info"

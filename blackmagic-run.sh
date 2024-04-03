@@ -1,5 +1,7 @@
 #!/bin/sh
 
+ELFFILE=target/thumbv6m-none-eabi/debug/ti-i2c
+
 reflash () {
   arm-none-eabi-gdb -nx --batch \
     -ex 'target extended-remote /dev/ttyBmpGdb' \
@@ -8,12 +10,12 @@ reflash () {
     -ex 'load' \
     -ex 'compare-sections' \
     -ex 'kill' \
-    target/thumbv6m-none-eabi/debug/ev2400-fuckup
+    $ELFFILE
 }
 
 run () {
   echo "waiting for the logs..."
-  socat /dev/ttyBmpTarg,rawer,b115200 STDOUT | defmt-print -e target/thumbv6m-none-eabi/debug/ev2400-fuckup
+  socat /dev/ttyBmpTarg,rawer,b115200 STDOUT | defmt-print -e $ELFFILE
 }
 
 for i in $@; do
