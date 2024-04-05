@@ -33,7 +33,7 @@ const USB_PID: u16 = 0x37;
 const USB_PACKET_SIZE: usize = 64;
 const USB_MANUFACTURER: &str = "Texas Instruments";
 const USB_PRODUCT_NAME: &str = "EV2400";
-const USB_SERIAL_NUMBER: &str = "F7BA1B5108002500";
+const USB_SERIAL_NUMBER: &str = "0000000008000000";
 
 type HidReaderWriter2<'a, D> = hid::HidReaderWriter<'a, D, USB_PACKET_SIZE, USB_PACKET_SIZE>;
 
