@@ -5,18 +5,19 @@
 mod commands;
 mod descriptors;
 mod errors;
+mod indications;
 mod parser;
 
 use crate::{descriptors::TiHidReport, errors::PacketError};
 
 use commands::{Packet, ResponseError};
 use embassy_executor::Spawner;
-use embassy_rp::{bind_interrupts, gpio, peripherals, uart, usb};
-use embassy_time::{Duration, Timer};
+use embassy_rp::{bind_interrupts, peripherals, uart, usb};
 use embassy_usb::class::hid;
 use errors::HandleError;
 use futures::future::join;
 use git_version::git_version;
+use indications::LedIndications;
 use parser::PacketParser;
 use static_cell::StaticCell;
 use usbd_hid::descriptor::SerializedDescriptor;
@@ -42,7 +43,7 @@ bind_interrupts!(struct Irqs {
 
 assign_resources! {
     led: LedResources {
-        led: PIN_25
+        green: PIN_25
     },
     logger: LoggerResources {
         uart: UART0,
@@ -52,6 +53,7 @@ assign_resources! {
 }
 
 async fn communicate<'a, D>(
+    indications: &LedIndications,
     parser: &PacketParser,
     hid: &mut HidReaderWriter2<'a, D>,
 ) -> Result<(), HandleError>
@@ -63,6 +65,8 @@ where
     let mut out_buffer = [0; USB_PACKET_SIZE - 1];
 
     hid.read(&mut in_buffer).await?;
+
+    indications.signal(());
 
     let response = match parser.incoming(&in_buffer[2..]) {
         Ok(request) => commands::process_message(request),
@@ -88,17 +92,6 @@ where
     Ok(())
 }
 
-#[embassy_executor::task]
-async fn blinky(res: LedResources) {
-    let mut led = gpio::Output::new(res.led, gpio::Level::Low);
-
-    loop {
-        // info!("running!...");
-        led.toggle();
-        Timer::after(Duration::from_secs(1)).await;
-    }
-}
-
 fn setup_uart_logger(res: LoggerResources) {
     let config = uart::Config::default();
     let uart = uart::Uart::new_blocking(res.uart, res.tx, res.rx, config);
@@ -119,7 +112,8 @@ async fn main(spawner: Spawner) {
 
     info!("ti-i2c ({}) is running. Hello!", git_version!());
 
-    unwrap!(spawner.spawn(blinky(resources.led)));
+    static LED_INDICATIONS: LedIndications = LedIndications::new();
+    unwrap!(spawner.spawn(indications::run(resources.led, &LED_INDICATIONS)));
 
     let driver = usb::Driver::new(embassy.USB, Irqs);
     let mut usb_config = embassy_usb::Config::new(USB_VID, USB_PID);
@@ -161,7 +155,7 @@ async fn main(spawner: Spawner) {
             loop {
                 trace!("handling HID events...");
 
-                if let Err(e) = communicate(&parser, &mut hid).await {
+                if let Err(e) = communicate(&LED_INDICATIONS, &parser, &mut hid).await {
                     error!("error while handling HID operations - {}", e);
                 }
             }
