@@ -2,12 +2,14 @@
 #![no_main]
 #![feature(future_join)]
 
+mod commands;
 mod descriptors;
 mod errors;
-mod ti;
+mod parser;
 
-use crate::{descriptors::TiHidReport, ti::PacketParser};
+use crate::{descriptors::TiHidReport, errors::PacketError};
 
+use commands::{Packet, ResponseError};
 use embassy_executor::Spawner;
 use embassy_rp::{bind_interrupts, gpio, peripherals, uart, usb};
 use embassy_time::{Duration, Timer};
@@ -15,6 +17,7 @@ use embassy_usb::class::hid;
 use errors::HandleError;
 use futures::future::join;
 use git_version::git_version;
+use parser::PacketParser;
 use static_cell::StaticCell;
 use usbd_hid::descriptor::SerializedDescriptor;
 
@@ -48,59 +51,39 @@ assign_resources! {
     }
 }
 
-async fn handle_hid<'a, D>(
+async fn communicate<'a, D>(
     parser: &PacketParser,
     hid: &mut HidReaderWriter2<'a, D>,
 ) -> Result<(), HandleError>
 where
     D: embassy_usb_driver::Driver<'a>,
 {
-    let mut command_buffer: [u8; 64] = [0; 64];
-    let mut response_buffer: [u8; 62] = [0; 62];
+    // TODO: why the out buffer has to be one byte smaller than the packet size?
+    let mut in_buffer = [0; USB_PACKET_SIZE];
+    let mut out_buffer = [0; USB_PACKET_SIZE - 1];
 
-    hid.read(&mut command_buffer).await?;
+    hid.read(&mut in_buffer).await?;
 
-    let (command, payload) = parser.parse(&mut command_buffer[2..])?;
-    match command {
-        // System
-        0xbd => info!("set usb char {}", payload),
-        0x80 => info!("poll status?"),
-        0xee => info!("comm clock speed"),
+    let response = match parser.incoming(&in_buffer[2..]) {
+        Ok(request) => commands::process_message(request),
+        Err(error) => {
+            let response = match error {
+                PacketError::Checksum => Packet::response_error(ResponseError::BadChecksum),
+                _ => Packet::response_error(ResponseError::Other),
+            };
 
-        // I2C
-        0x1d => info!("i2c read block {}", payload),
-        0x1e => info!("i2c write block {}", payload),
+            Some(response)
+        }
+    };
 
-        // SMBus
-        0x01 => info!("read SMBus word {}", payload),
-        0x02 => info!("read SMBus block {}", payload),
-        0x04 => info!("write SMBus word {}", payload),
-        0x05 => info!("write SMBus block {}", payload),
+    if let Some(r) = response {
+        let len = parser.outgoing(&mut out_buffer[2..], &r)?;
 
-        // SPI
-        0xd1 => info!("read SPI block {}", payload),
-        0xd2 => info!("read SPI conf {}", payload),
-        0xd3 => info!("write SPI block {}", payload),
-        0xb2 => info!("write SPI conf {}", payload),
+        out_buffer[0] = 0x01;
+        out_buffer[1] = len as u8;
 
-        _ => error!("unknown command - {:x}, {}", command, payload),
+        hid.write(&out_buffer).await?;
     }
-
-    let mut response: [u8; 63] = [0; 63];
-
-    response[0] = 0x01;
-    response[1] = 8;
-
-    response[2] = 0xAA;
-    response[3] = 0x52;
-    response[4] = 0;
-    response[5] = 0;
-    response[6] = 0;
-    response[7] = 0; // payload len
-    response[8] = 0xEE; // checkdum
-    response[9] = 0x55;
-
-    hid.write(&response).await?;
 
     Ok(())
 }
@@ -178,7 +161,7 @@ async fn main(spawner: Spawner) {
             loop {
                 trace!("handling HID events...");
 
-                if let Err(e) = handle_hid(&parser, &mut hid).await {
+                if let Err(e) = communicate(&parser, &mut hid).await {
                     error!("error while handling HID operations - {}", e);
                 }
             }

@@ -1,7 +1,7 @@
 use crc::Crc;
 use defmt::error;
 
-use crate::errors::PacketError;
+use crate::{commands::Packet, errors::PacketError};
 
 // Packet format is as follows:
 //
@@ -23,7 +23,6 @@ use crate::errors::PacketError;
 mod magic {
     pub const START_SENTINEL: u8 = 0xAA;
     pub const END_SENTINEL: u8 = 0x55;
-    pub const CHECKSUM_PLACEHOLDER: u8 = 0x00;
 }
 
 mod indexes {
@@ -34,6 +33,7 @@ mod indexes {
 
     // From the end
     pub const E_CHECKSUM: usize = 1;
+    pub const E_PAYLOAD_END: usize = 2;
 }
 
 const SERVICE_FIELDS_LEN: usize = 8;
@@ -47,39 +47,63 @@ impl PacketParser {
         self.crc.checksum(packet)
     }
 
-    pub fn parse<'a>(&self, buffer: &'a mut [u8]) -> Result<(u8, &'a [u8]), PacketError> {
+    pub fn incoming<'a>(&self, buffer: &'a [u8]) -> Result<Packet<'a>, PacketError> {
         if buffer.len() < SERVICE_FIELDS_LEN {
             return Err(PacketError::Len);
         }
 
         let payload_len = buffer[indexes::S_PAYLOAD_LEN] as usize;
         let proposed_len = SERVICE_FIELDS_LEN + payload_len;
-        let start = 0;
         let end = proposed_len - 1;
+        let payload_end = end - indexes::E_PAYLOAD_END;
 
         if proposed_len > buffer.len() {
             error!("misformed packet - payload len is {}", payload_len);
             return Err(PacketError::Len);
         }
 
-        if buffer[start] != magic::START_SENTINEL || buffer[end] != magic::END_SENTINEL {
+        if buffer[0] != magic::START_SENTINEL || buffer[end] != magic::END_SENTINEL {
             return Err(PacketError::Format);
         }
 
         let their_checksum = buffer[end - indexes::E_CHECKSUM];
-
-        // Remove the provided checksum and calculate ours
-        buffer[end - indexes::E_CHECKSUM] = magic::CHECKSUM_PLACEHOLDER;
-        let our_checksum = self.checksum(&buffer[start + 1..end - 1]);
+        let our_checksum = self.checksum(&buffer[indexes::S_ACTION..=payload_end]);
 
         if their_checksum == our_checksum {
-            let payload = &buffer[indexes::S_PAYLOAD_START..indexes::S_PAYLOAD_START + payload_len];
+            let payload = &buffer[indexes::S_PAYLOAD_START..=payload_end];
             let action = buffer[indexes::S_ACTION];
 
-            Ok((action, payload))
+            Ok(Packet { action, payload })
         } else {
+            error!("crc mismatch - {} vs {}", their_checksum, our_checksum);
             Err(PacketError::Checksum)
         }
+    }
+
+    pub fn outgoing(&self, buffer: &mut [u8], data: &Packet) -> Result<usize, PacketError> {
+        let payload_len = data.payload.len();
+        let proposed_len = payload_len + SERVICE_FIELDS_LEN;
+        let end = proposed_len - 1;
+        let payload_end = end - indexes::E_PAYLOAD_END;
+
+        if proposed_len > buffer.len() || payload_len > u8::MAX as usize {
+            return Err(PacketError::Len);
+        }
+
+        buffer.fill(0);
+
+        buffer[0] = magic::START_SENTINEL;
+        buffer[indexes::S_ACTION] = data.action;
+        buffer[indexes::S_PAYLOAD_LEN] = payload_len as u8;
+
+        buffer[indexes::S_PAYLOAD_START..=payload_end].copy_from_slice(data.payload);
+        buffer[end] = magic::END_SENTINEL;
+
+        // Compute the checksum and fill in the packet
+        let checksum = self.checksum(&buffer[indexes::S_ACTION..=payload_end]);
+        buffer[end - indexes::E_CHECKSUM] = checksum;
+
+        Ok(proposed_len)
     }
 
     pub fn new() -> Self {
