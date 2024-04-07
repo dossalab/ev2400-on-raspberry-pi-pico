@@ -3,7 +3,6 @@
 #![feature(future_join)]
 
 mod commands;
-mod errors;
 mod indications;
 mod parser;
 mod usb;

@@ -2,14 +2,15 @@ use defmt::error;
 use defmt::trace;
 use embassy_rp::usb;
 use embassy_usb::class::hid;
+use embassy_usb_driver as usbhw;
 use futures::future::join;
 use usbd_hid::descriptor::gen_hid_descriptor;
 use usbd_hid::descriptor::generator_prelude::*;
 
 use crate::commands;
-use crate::errors::HandleError;
 use crate::indications::LedIndications;
 use crate::parser::PacketParser;
+use crate::parser::ParserError;
 use crate::Irqs;
 use crate::UsbResources;
 
@@ -38,6 +39,31 @@ pub struct TiHidReport {
 }
 
 type HidReaderWriter2<'a, D> = hid::HidReaderWriter<'a, D, USB_PACKET_SIZE, USB_PACKET_SIZE>;
+
+#[derive(defmt::Format)]
+enum HandleError {
+    HidReadError(hid::ReadError),
+    HidWriteError(usbhw::EndpointError),
+    ParserError(ParserError),
+}
+
+impl From<hid::ReadError> for HandleError {
+    fn from(err: hid::ReadError) -> Self {
+        HandleError::HidReadError(err)
+    }
+}
+
+impl From<usbhw::EndpointError> for HandleError {
+    fn from(err: usbhw::EndpointError) -> Self {
+        HandleError::HidWriteError(err)
+    }
+}
+
+impl From<ParserError> for HandleError {
+    fn from(err: ParserError) -> Self {
+        HandleError::ParserError(err)
+    }
+}
 
 async fn communicate<'a, D>(
     indications: &LedIndications,
