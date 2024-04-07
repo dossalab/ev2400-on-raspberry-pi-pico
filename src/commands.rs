@@ -1,4 +1,6 @@
-use defmt::{error, info};
+use defmt::{error, info, warn};
+
+use crate::parser::Packet;
 
 mod requests {
     pub const I2C_READ: u8 = 0x1d;
@@ -25,32 +27,24 @@ pub enum ResponseError {
     Other,
 }
 
-#[derive(defmt::Format)]
-pub struct Packet<'a> {
-    pub action: u8,
-    pub payload: &'a [u8],
-}
+struct PacketFactory;
 
-impl<'a> Packet<'a> {
-    pub const fn new(action: u8, payload: &'a [u8]) -> Self {
-        Self { action, payload }
+impl PacketFactory {
+    pub const fn response_status<'a>() -> Packet<'a> {
+        // This actually contains the version of our 'probe' :)
+        Packet::new(responses::STATUS, &[FW_VERSION_MAJOR, FW_VERSION_MINOR])
     }
 
     // 2 more existing codes:
     // 0x94 = timeout or device busy?
     // 0x95 = not able to find a free comm adapter
-    pub const fn response_error(e: ResponseError) -> Self {
+    pub const fn response_error<'a>(e: ResponseError) -> Packet<'a> {
         match e {
-            ResponseError::Other => Self::new(responses::ERR, &[0, 0x90]),
-            ResponseError::BadChecksum => Self::new(responses::ERR, &[0, 0x91]),
-            ResponseError::TimeoutBusy => Self::new(responses::ERR, &[0, 0x92]),
-            ResponseError::NoAck => Self::new(responses::ERR, &[0, 0x93]),
+            ResponseError::Other => Packet::new(responses::ERR, &[0, 0x90]),
+            ResponseError::BadChecksum => Packet::new(responses::ERR, &[0, 0x91]),
+            ResponseError::TimeoutBusy => Packet::new(responses::ERR, &[0, 0x92]),
+            ResponseError::NoAck => Packet::new(responses::ERR, &[0, 0x93]),
         }
-    }
-
-    pub const fn response_status() -> Self {
-        // This actually contains the version of our 'probe' :)
-        Self::new(responses::STATUS, &[FW_VERSION_MAJOR, FW_VERSION_MINOR])
     }
 }
 
@@ -83,12 +77,12 @@ pub fn process_message(command: Packet) -> Option<Packet> {
             info!("device status");
 
             // We can also return error here if we're still busy or something like that....
-            return Some(Packet::response_status());
+            return Some(PacketFactory::response_status());
         }
 
-        _ => error!("unknown command - {}", command),
+        _ => warn!("unknown command - {}", command),
     }
 
     // Just pretend we don't have such device if we're asked about any other bus :)
-    Some(Packet::response_error(ResponseError::NoAck))
+    Some(PacketFactory::response_error(ResponseError::NoAck))
 }

@@ -1,18 +1,13 @@
 use embassy_usb::class::hid::ReadError;
 use embassy_usb_driver::EndpointError;
 
-#[derive(defmt::Format)]
-pub enum PacketError {
-    Len,
-    Format,
-    Checksum,
-}
+use crate::parser::ParserError;
 
 #[derive(defmt::Format)]
 pub enum HandleError {
     HidReadError(ReadError),
     HidWriteError(EndpointError),
-    PacketError(PacketError),
+    ParserError(ParserError),
 }
 
 impl From<ReadError> for HandleError {
@@ -27,8 +22,8 @@ impl From<EndpointError> for HandleError {
     }
 }
 
-impl From<PacketError> for HandleError {
-    fn from(err: PacketError) -> Self {
-        HandleError::PacketError(err)
+impl From<ParserError> for HandleError {
+    fn from(err: ParserError) -> Self {
+        HandleError::ParserError(err)
     }
 }

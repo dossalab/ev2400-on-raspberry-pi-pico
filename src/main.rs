@@ -8,9 +8,8 @@ mod errors;
 mod indications;
 mod parser;
 
-use crate::{descriptors::TiHidReport, errors::PacketError};
+use crate::descriptors::TiHidReport;
 
-use commands::{Packet, ResponseError};
 use embassy_executor::Spawner;
 use embassy_rp::{bind_interrupts, peripherals, uart, usb};
 use embassy_usb::class::hid;
@@ -65,28 +64,21 @@ where
     let mut out_buffer = [0; USB_PACKET_SIZE - 1];
 
     hid.read(&mut in_buffer).await?;
+    let request = parser.incoming(&in_buffer[2..])?;
 
     indications.signal(());
 
-    let response = match parser.incoming(&in_buffer[2..]) {
-        Ok(request) => commands::process_message(request),
-        Err(error) => {
-            let response = match error {
-                PacketError::Checksum => Packet::response_error(ResponseError::BadChecksum),
-                _ => Packet::response_error(ResponseError::Other),
-            };
+    match commands::process_message(request) {
+        Some(response) => {
+            let len = parser.outgoing(&mut out_buffer[2..], &response)?;
 
-            Some(response)
+            out_buffer[0] = 0x01;
+            out_buffer[1] = len as u8;
+
+            hid.write(&out_buffer).await?;
         }
-    };
 
-    if let Some(r) = response {
-        let len = parser.outgoing(&mut out_buffer[2..], &r)?;
-
-        out_buffer[0] = 0x01;
-        out_buffer[1] = len as u8;
-
-        hid.write(&out_buffer).await?;
+        None => {}
     }
 
     Ok(())

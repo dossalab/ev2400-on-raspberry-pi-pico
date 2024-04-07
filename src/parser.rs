@@ -1,8 +1,6 @@
 use crc::Crc;
 use defmt::error;
 
-use crate::{commands::Packet, errors::PacketError};
-
 // Packet format is as follows:
 //
 // [0] = 0xAA (start sequence)
@@ -38,6 +36,25 @@ mod indexes {
 
 const SERVICE_FIELDS_LEN: usize = 8;
 
+#[derive(defmt::Format)]
+pub enum ParserError {
+    Len,
+    Format,
+    Checksum,
+}
+
+#[derive(defmt::Format)]
+pub struct Packet<'a> {
+    pub action: u8,
+    pub payload: &'a [u8],
+}
+
+impl<'a> Packet<'a> {
+    pub const fn new(action: u8, payload: &'a [u8]) -> Self {
+        Self { action, payload }
+    }
+}
+
 pub struct PacketParser {
     crc: Crc<u8>,
 }
@@ -47,9 +64,9 @@ impl PacketParser {
         self.crc.checksum(packet)
     }
 
-    pub fn incoming<'a>(&self, buffer: &'a [u8]) -> Result<Packet<'a>, PacketError> {
+    pub fn incoming<'a>(&self, buffer: &'a [u8]) -> Result<Packet<'a>, ParserError> {
         if buffer.len() < SERVICE_FIELDS_LEN {
-            return Err(PacketError::Len);
+            return Err(ParserError::Len);
         }
 
         let payload_len = buffer[indexes::S_PAYLOAD_LEN] as usize;
@@ -59,11 +76,11 @@ impl PacketParser {
 
         if proposed_len > buffer.len() {
             error!("misformed packet - payload len is {}", payload_len);
-            return Err(PacketError::Len);
+            return Err(ParserError::Len);
         }
 
         if buffer[0] != magic::START_SENTINEL || buffer[end] != magic::END_SENTINEL {
-            return Err(PacketError::Format);
+            return Err(ParserError::Format);
         }
 
         let their_checksum = buffer[end - indexes::E_CHECKSUM];
@@ -76,18 +93,18 @@ impl PacketParser {
             Ok(Packet { action, payload })
         } else {
             error!("crc mismatch - {} vs {}", their_checksum, our_checksum);
-            Err(PacketError::Checksum)
+            Err(ParserError::Checksum)
         }
     }
 
-    pub fn outgoing(&self, buffer: &mut [u8], data: &Packet) -> Result<usize, PacketError> {
+    pub fn outgoing(&self, buffer: &mut [u8], data: &Packet) -> Result<usize, ParserError> {
         let payload_len = data.payload.len();
         let proposed_len = payload_len + SERVICE_FIELDS_LEN;
         let end = proposed_len - 1;
         let payload_end = end - indexes::E_PAYLOAD_END;
 
         if proposed_len > buffer.len() || payload_len > u8::MAX as usize {
-            return Err(PacketError::Len);
+            return Err(ParserError::Len);
         }
 
         buffer.fill(0);
