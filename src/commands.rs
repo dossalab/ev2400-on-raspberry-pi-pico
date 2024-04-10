@@ -104,9 +104,9 @@ where
         );
 
         if read {
-            if len > Packet::max_payload(USB_ENDPOINT_SIZE) {
+            if len > Packet::max_payload(USB_ENDPOINT_SIZE) || len > self.i2c_buffer.len() {
                 error!(
-                    "bad packet - can't send back that much data (requested len is {})",
+                    "bad packet - can't send / hold that much data (requested len is {})",
                     len
                 );
 
