@@ -50,6 +50,14 @@ pub struct Packet<'a> {
 }
 
 impl<'a> Packet<'a> {
+    pub const fn max_payload(buffer_size: usize) -> usize {
+        if buffer_size <= SERVICE_FIELDS_LEN {
+            0
+        } else {
+            buffer_size - SERVICE_FIELDS_LEN
+        }
+    }
+
     pub const fn new(action: u8, payload: &'a [u8]) -> Self {
         Self { action, payload }
     }

@@ -8,7 +8,7 @@ mod parser;
 mod usb;
 
 use embassy_executor::Spawner;
-use embassy_rp::{bind_interrupts, peripherals, uart, usb as usbhw};
+use embassy_rp::{bind_interrupts, i2c, peripherals, uart, usb as usbhw};
 use git_version::git_version;
 use indications::LedIndications;
 use static_cell::StaticCell;
@@ -20,6 +20,7 @@ use assign_resources::assign_resources;
 
 bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => usbhw::InterruptHandler<peripherals::USB>;
+    I2C0_IRQ => i2c::InterruptHandler<peripherals::I2C0>;
 });
 
 assign_resources! {
@@ -33,6 +34,11 @@ assign_resources! {
     },
     usb: UsbResources {
         usb: USB
+    },
+    i2c: I2cResources {
+        i2c: I2C0,
+        sda: PIN_8,
+        scl: PIN_9,
     }
 }
 fn setup_uart_logger(res: LoggerResources) {
@@ -58,5 +64,5 @@ async fn main(spawner: Spawner) {
     static LED_INDICATIONS: LedIndications = LedIndications::new();
 
     unwrap!(spawner.spawn(indications::run(resources.led, &LED_INDICATIONS)));
-    unwrap!(spawner.spawn(usb::run(resources.usb, &LED_INDICATIONS)));
+    unwrap!(spawner.spawn(usb::run(resources.usb, resources.i2c, &LED_INDICATIONS)));
 }

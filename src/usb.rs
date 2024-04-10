@@ -1,18 +1,16 @@
-use defmt::error;
-use defmt::trace;
-use embassy_rp::usb;
-use embassy_usb::class::hid;
+use defmt::{error, trace};
+use embassy_rp::{i2c, usb};
+use embassy_usb::class::hid::{self, HidReaderWriter};
 use embassy_usb_driver as usbhw;
-use futures::future::join;
 use usbd_hid::descriptor::gen_hid_descriptor;
 use usbd_hid::descriptor::generator_prelude::*;
 
-use crate::commands;
+use crate::commands::Communicator;
 use crate::indications::LedIndications;
-use crate::parser::PacketParser;
-use crate::parser::ParserError;
-use crate::Irqs;
-use crate::UsbResources;
+use crate::parser::{PacketParser, ParserError};
+use crate::{I2cResources, Irqs, UsbResources};
+
+use futures::future::join;
 
 // Basic USB parameters
 const USB_VID: u16 = 0x451;
@@ -21,6 +19,9 @@ const USB_PACKET_SIZE: usize = 64;
 const USB_MANUFACTURER: &str = "Texas Instruments";
 const USB_PRODUCT_NAME: &str = "EV2400";
 const USB_SERIAL_NUMBER: &str = "0000000008000000";
+
+// TODO: why can't we use this in the following macro?
+pub const USB_ENDPOINT_SIZE: usize = 62;
 
 #[gen_hid_descriptor(
      (collection = APPLICATION, usage_page = 0xFF09, usage = 1) = {
@@ -37,8 +38,6 @@ pub struct TiHidReport {
     pub buff1: [u8; 62],
     pub buff2: [u8; 62],
 }
-
-type HidReaderWriter2<'a, D> = hid::HidReaderWriter<'a, D, USB_PACKET_SIZE, USB_PACKET_SIZE>;
 
 #[derive(defmt::Format)]
 enum HandleError {
@@ -65,42 +64,68 @@ impl From<ParserError> for HandleError {
     }
 }
 
-async fn communicate<'a, D>(
-    indications: &LedIndications,
-    parser: &PacketParser,
-    hid: &mut HidReaderWriter2<'a, D>,
-) -> Result<(), HandleError>
+struct HidHandler<'a, U, I>
 where
-    D: embassy_usb_driver::Driver<'a>,
+    U: embassy_usb_driver::Driver<'a>,
+    I: embedded_hal_async::i2c::I2c,
 {
+    parser: PacketParser,
+    hid: HidReaderWriter<'a, U, USB_PACKET_SIZE, USB_PACKET_SIZE>,
+    indications: &'a LedIndications,
+    comm: Communicator<I>,
+
     // TODO: why the out buffer has to be one byte smaller than the packet size?
-    let mut in_buffer = [0; USB_PACKET_SIZE];
-    let mut out_buffer = [0; USB_PACKET_SIZE - 1];
+    in_buffer: [u8; USB_PACKET_SIZE],
+    out_buffer: [u8; USB_PACKET_SIZE - 1],
+}
 
-    hid.read(&mut in_buffer).await?;
-    let request = parser.incoming(&in_buffer[2..])?;
+impl<'a, U, I> HidHandler<'a, U, I>
+where
+    U: embassy_usb_driver::Driver<'a>,
+    I: embedded_hal_async::i2c::I2c,
+{
+    pub async fn run(&mut self) -> Result<(), HandleError> {
+        self.hid.read(&mut self.in_buffer).await?;
 
-    indications.signal(());
+        self.indications.signal(());
+        let request = self.parser.incoming(&self.in_buffer[2..])?;
 
-    match commands::process_message(request) {
-        Some(response) => {
-            let len = parser.outgoing(&mut out_buffer[2..], &response)?;
+        match self.comm.run(&request).await {
+            Some(response) => {
+                let len = self.parser.outgoing(&mut self.out_buffer[2..], &response)?;
 
-            out_buffer[0] = 0x01;
-            out_buffer[1] = len as u8;
+                self.out_buffer[0] = 0x01;
+                self.out_buffer[1] = len as u8;
 
-            hid.write(&out_buffer).await?;
+                self.hid.write(&self.out_buffer).await?;
+            }
+
+            _ => {}
         }
 
-        None => {}
+        Ok(())
     }
 
-    Ok(())
+    fn new(
+        comm: Communicator<I>,
+        parser: PacketParser,
+        hid: HidReaderWriter<'a, U, USB_PACKET_SIZE, USB_PACKET_SIZE>,
+        indications: &'a LedIndications,
+    ) -> Self {
+        Self {
+            parser,
+            hid,
+            indications,
+            comm,
+            in_buffer: [0; USB_PACKET_SIZE],
+            out_buffer: [0; USB_PACKET_SIZE - 1],
+        }
+    }
 }
 
 #[embassy_executor::task]
-pub async fn run(r: UsbResources, indications: &'static LedIndications) {
-    let driver = usb::Driver::new(r.usb, Irqs);
+pub async fn run(usbr: UsbResources, i2cr: I2cResources, indications: &'static LedIndications) {
+    let driver = usb::Driver::new(usbr.usb, Irqs);
     let mut usb_config = embassy_usb::Config::new(USB_VID, USB_PID);
 
     usb_config.manufacturer = Some(USB_MANUFACTURER);
@@ -130,21 +155,26 @@ pub async fn run(r: UsbResources, indications: &'static LedIndications) {
         max_packet_size: USB_PACKET_SIZE as u16,
     };
 
-    let mut hid = HidReaderWriter2::new(&mut builder, &mut state, hid_config);
+    let hid = HidReaderWriter::new(&mut builder, &mut state, hid_config);
     let mut usb = builder.build();
+    let i2c = i2c::I2c::new_async(i2cr.i2c, i2cr.scl, i2cr.sda, Irqs, i2c::Config::default());
 
     join(
         async {
+            let comm = Communicator::new(i2c);
             let parser = PacketParser::new();
+            let mut handler = HidHandler::new(comm, parser, hid, indications);
+
             loop {
                 trace!("handling HID events...");
 
-                if let Err(e) = communicate(indications, &parser, &mut hid).await {
+                if let Err(e) = handler.run().await {
+                    // actually speaking not all errors require such harsh report message
+                    // i'd prefer to keep those for HW errors only, as parser errors are unfortunately pretty common...
                     error!("error while handling HID operations - {}", e);
                 }
             }
         },
-        // This could be a separate task but it's pretty hard to make the lifetimes happy in that case :)
         usb.run(),
     )
     .await;
