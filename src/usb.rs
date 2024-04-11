@@ -1,3 +1,4 @@
+use defmt::info;
 use defmt::{error, trace};
 use embassy_rp::{i2c, usb};
 use embassy_usb::class::hid::{self, HidReaderWriter};

@@ -59,28 +59,43 @@ impl<I> Communicator<I>
 where
     I: embedded_hal_async::i2c::I2c,
 {
-    async fn i2c_read<'a>(&mut self, address: u8, start: u8, len: usize) -> Option<Packet> {
-        info!("i2c: reading...");
+    async fn i2c_read<'a>(&mut self, addr: u8, start: u8, len: usize) -> Option<Packet> {
+        info!("i2c: reading, start is {:x}, len is {:x}", start, len);
 
-        let buffer = &mut self.i2c_buffer[0..len];
+        // 2 bytes are reserved for some metadata...
+        let payload = &mut self.i2c_buffer[0..len + 2];
 
-        match self.i2c.write_read(address, &[start], buffer).await {
-            Ok(_) => Some(PacketFactory::response_error(ResponseError::NoAck)),
-            Err(_) => Some(Packet::new(responses::I2C_READ, buffer)),
+        // though this does not seem to affect anything...
+        payload[0] = 0;
+        payload[1] = 0;
+
+        match self.i2c.write_read(addr, &[start], &mut payload[2..]).await {
+            Ok(_) => Some(Packet::new(responses::I2C_READ, payload)),
+            Err(_) => Some(PacketFactory::response_error(ResponseError::NoAck)),
         }
     }
 
-    async fn i2c_write<'a>(&mut self, address: u8, start: u8, data: &[u8]) -> Option<Packet> {
-        info!("i2c: writing...");
+    async fn i2c_write<'a>(&mut self, addr: u8, start: u8, data: &[u8]) -> Option<Packet> {
+        info!(
+            "i2c: writing, start is {:x}, data is {:x} ({} bytes)",
+            start,
+            data,
+            data.len()
+        );
 
-        let r1 = self.i2c.write(address, &[start]).await;
-        let r2 = self.i2c.write(address, data).await;
+        // we reserve 1 byte for the 'start' argument
+        let transaction_len = data.len() + 1;
+        let buffer = &mut self.i2c_buffer[0..transaction_len];
 
-        if r1.is_err() || r2.is_err() {
-            Some(PacketFactory::response_error(ResponseError::NoAck))
-        } else {
+        // it's ugly that we have to copy, after doing all that... but doing 2 i2c writes ain't going to cut it...
+        buffer[0] = start;
+        buffer[1..].copy_from_slice(data);
+
+        match self.i2c.write(addr, buffer).await {
+            Err(_) => Some(PacketFactory::response_error(ResponseError::NoAck)),
+
             // it's expected not to send any response here - in fact if we send something it will confuse the host
-            None
+            Ok(_) => None,
         }
     }
 
@@ -92,7 +107,7 @@ where
             return bad_packet_response;
         }
 
-        let address = command.payload[0];
+        let address = command.payload[0] >> 1;
         let start = command.payload[1];
         let len = command.payload[2] as usize;
 
@@ -104,7 +119,10 @@ where
         );
 
         if read {
-            if len > Packet::max_payload(USB_ENDPOINT_SIZE) || len > self.i2c_buffer.len() {
+            // 2 fields are reserved for response metadata
+            let payload_len = 2 + len;
+
+            if payload_len > Packet::max_payload(USB_ENDPOINT_SIZE) {
                 error!(
                     "bad packet - can't send / hold that much data (requested len is {})",
                     len
