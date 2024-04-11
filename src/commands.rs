@@ -160,7 +160,10 @@ where
             // So we're never busy - if we received that message, we're not doing any i2c work
             requests::STATUS => Some(PacketFactory::response_status()),
 
-            _ => Some(PacketFactory::response_error(ResponseError::NoAck)),
+            _ => {
+                trace!("unhandled packet: {}", request);
+                Some(PacketFactory::response_error(ResponseError::NoAck))
+            }
         }
     }
 
