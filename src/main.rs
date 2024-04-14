@@ -35,10 +35,13 @@ assign_resources! {
     usb: UsbResources {
         usb: USB
     },
-    i2c: I2cResources {
+    comm: CommResources {
         i2c: I2C0,
         sda: PIN_8,
         scl: PIN_9,
+        pin_1: PIN_10,
+        pin_2: PIN_11,
+        pin_4: PIN_12,
     }
 }
 fn setup_uart_logger(res: LoggerResources) {
@@ -64,5 +67,5 @@ async fn main(spawner: Spawner) {
     static LED_INDICATIONS: LedIndications = LedIndications::new();
 
     unwrap!(spawner.spawn(indications::run(resources.led, &LED_INDICATIONS)));
-    unwrap!(spawner.spawn(usb::run(resources.usb, resources.i2c, &LED_INDICATIONS)));
+    unwrap!(spawner.spawn(usb::run(resources.usb, resources.comm, &LED_INDICATIONS)));
 }

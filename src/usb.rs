@@ -1,6 +1,5 @@
-use defmt::info;
 use defmt::{error, trace};
-use embassy_rp::{i2c, usb};
+use embassy_rp::usb;
 use embassy_usb::class::hid::{self, HidReaderWriter};
 use embassy_usb_driver as usbhw;
 use usbd_hid::descriptor::gen_hid_descriptor;
@@ -9,7 +8,7 @@ use usbd_hid::descriptor::generator_prelude::*;
 use crate::commands::Communicator;
 use crate::indications::LedIndications;
 use crate::parser::{PacketParser, ParserError};
-use crate::{I2cResources, Irqs, UsbResources};
+use crate::{CommResources, Irqs, UsbResources};
 
 use futures::future::join;
 
@@ -65,25 +64,23 @@ impl From<ParserError> for HandleError {
     }
 }
 
-struct HidHandler<'a, U, I>
+struct HidHandler<'a, U>
 where
     U: embassy_usb_driver::Driver<'a>,
-    I: embedded_hal_async::i2c::I2c,
 {
     parser: PacketParser,
     hid: HidReaderWriter<'a, U, USB_PACKET_SIZE, USB_PACKET_SIZE>,
     indications: &'a LedIndications,
-    comm: Communicator<I>,
+    comm: Communicator,
 
     // TODO: why the out buffer has to be one byte smaller than the packet size?
     in_buffer: [u8; USB_PACKET_SIZE],
     out_buffer: [u8; USB_PACKET_SIZE - 1],
 }
 
-impl<'a, U, I> HidHandler<'a, U, I>
+impl<'a, U> HidHandler<'a, U>
 where
     U: embassy_usb_driver::Driver<'a>,
-    I: embedded_hal_async::i2c::I2c,
 {
     pub async fn run(&mut self) -> Result<(), HandleError> {
         self.hid.read(&mut self.in_buffer).await?;
@@ -108,7 +105,7 @@ where
     }
 
     fn new(
-        comm: Communicator<I>,
+        comm: Communicator,
         parser: PacketParser,
         hid: HidReaderWriter<'a, U, USB_PACKET_SIZE, USB_PACKET_SIZE>,
         indications: &'a LedIndications,
@@ -125,7 +122,7 @@ where
 }
 
 #[embassy_executor::task]
-pub async fn run(usbr: UsbResources, i2cr: I2cResources, indications: &'static LedIndications) {
+pub async fn run(usbr: UsbResources, commr: CommResources, indications: &'static LedIndications) {
     let driver = usb::Driver::new(usbr.usb, Irqs);
     let mut usb_config = embassy_usb::Config::new(USB_VID, USB_PID);
 
@@ -158,11 +155,10 @@ pub async fn run(usbr: UsbResources, i2cr: I2cResources, indications: &'static L
 
     let hid = HidReaderWriter::new(&mut builder, &mut state, hid_config);
     let mut usb = builder.build();
-    let i2c = i2c::I2c::new_async(i2cr.i2c, i2cr.scl, i2cr.sda, Irqs, i2c::Config::default());
 
     join(
         async {
-            let comm = Communicator::new(i2c);
+            let comm = Communicator::new(commr);
             let parser = PacketParser::new();
             let mut handler = HidHandler::new(comm, parser, hid, indications);
 
