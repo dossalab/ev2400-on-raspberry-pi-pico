@@ -1,5 +1,5 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
-runner = "./blackmagic-run.sh flash logs"
+runner = "tools/blackmagic-runner.sh run"
 
 [build]
 target = "thumbv6m-none-eabi"
