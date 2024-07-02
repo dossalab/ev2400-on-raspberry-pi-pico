@@ -26,7 +26,7 @@ Pico uses 3.3V logic levels - if your hardware uses something different you will
 | 16 | 12 | GPIO output 4 |
 |  1 |  0 | Defmt logger (this firmware debugging) |
 
-## Developing
+## Development
 
 I use BlackMagic probe for debugging and writing the firmware to the target. There are some supporting scripts to help write binaries to the target hooked to `cargo run`. For creating UF2 files [this tool](https://github.com/JoNil/elf2uf2-rs) is used (available in ArchLinux repository or through `cargo install`)
 Firmware uses serial for `defmt` log output. That was done to help debug USB issues (you can unplug and plug back USB without losing early logs). You will need to compile your own firmware if you want to see these (because `defmt` indexes logs and uses original ELF firmware for lookup)
