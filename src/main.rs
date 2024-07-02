@@ -62,7 +62,10 @@ async fn main(spawner: Spawner) {
 
     setup_uart_logger(resources.logger);
 
-    info!("ti-i2c ({}) is running. Hello!", git_version!());
+    info!(
+        "ti-i2c ({}) is running. Hello!",
+        git_version!(args = ["--tags", "--dirty"])
+    );
 
     static LED_INDICATIONS: LedIndications = LedIndications::new();
 
