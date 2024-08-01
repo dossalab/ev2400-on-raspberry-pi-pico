@@ -30,7 +30,7 @@ cortex-m-rt = "0.7.0"
 panic-probe = "0.3"
 git-version = "0.3.9"
 assign-resources = "0.4.1"
-usbd-hid = "0.7.0"
+usbd-hid = "0.8.1"
 static_cell = "2.0.0"
 portable-atomic = { version = "1.5", features = ["critical-section"] }
 futures = { version = "0.3.30", default-features = false }
