@@ -1,6 +1,5 @@
 #![no_std]
 #![no_main]
-#![feature(future_join)]
 
 mod commands;
 mod indications;
@@ -64,7 +63,7 @@ async fn main(spawner: Spawner) {
 
     info!(
         "ti-i2c ({}) is running. Hello!",
-        git_version!(args = ["--tags", "--dirty"])
+        git_version!(args = ["--tags", "--dirty"], fallback = "unknown")
     );
 
     static LED_INDICATIONS: LedIndications = LedIndications::new();
